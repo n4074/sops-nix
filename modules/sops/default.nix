@@ -130,24 +130,31 @@ in {
       '';
     };
 
+    ageKeyFile = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "/root/.sops/keys.txt";
+      description = ''
+        Path to age key file containing the key for decrypting sops file.
+      '';
+    };
+
     sshKeyPaths = mkOption {
-      type = types.listOf types.path;
+      type = types.nullOr (types.listOf types.path);
       default = if config.services.openssh.enable then
                   map (e: e.path) (lib.filter (e: e.type == "rsa") config.services.openssh.hostKeys)
-                else [];
+                else null;
       description = ''
         Path to ssh keys added as GPG keys during sops description.
         This option must be explicitly unset if <literal>config.sops.sshKeyPaths</literal>.
       '';
     };
+
   };
   config = mkIf (cfg.secrets != {}) {
     assertions = [{
-      assertion = cfg.gnupgHome != null -> cfg.sshKeyPaths == [];
-      message = "Configuration options sops.gnupgHome and sops.sshKeyPaths cannot be set both at the same time";
-    } {
-      assertion = cfg.gnupgHome == null -> cfg.sshKeyPaths != [];
-      message = "Either sops.sshKeyPaths and sops.gnupgHome must be set";
+      assertion = (lib.count (x: x != null) [ cfg.gnupgHome cfg.sshKeyPaths cfg.ageKeyFile ]) == 1;
+      message = "Only one of configuration options sops.gnupgHome, sops.sshKeyPaths and sops.ageKeyFile may be set";
     }] ++ map (name: let
       inherit (cfg.secrets.${name}) sopsFile;
     in {
@@ -157,7 +164,7 @@ in {
 
     system.activationScripts.setup-secrets = stringAfter [ "users" "groups" ] ''
       echo setting up secrets...
-      ${optionalString (cfg.gnupgHome != null) "SOPS_GPG_EXEC=${pkgs.gnupg}/bin/gpg"} ${sops-install-secrets}/bin/sops-install-secrets ${checkedManifest}
+      ${optionalString (cfg.gnupgHome != null) "SOPS_GPG_EXEC=${pkgs.gnupg}/bin/gpg"} ${optionalString (cfg.ageKeyFile != null) "SOPS_AGE_KEY_FILE=${cfg.ageKeyFile}" } ${sops-install-secrets}/bin/sops-install-secrets ${checkedManifest}
     '';
   };
 }
